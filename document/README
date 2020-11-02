@@ -1,0 +1,15 @@
+1. To compile the code successfully, you need to have the libunbound
+library first. Normally the library is installed together with unbound.
+Please make sure the libunbound is installed in the path which gcc will
+search automaticaly by default.
+
+Or you could include your libunbound path in the Makefile. For example, 
+you could append "-Wl,-rpath=/your/path" to the original CFLAGS. After
+compiling, you could check the link path by using "ldd ping64".
+
+2. To enable the security validating function, please use -s and -k
+<your keys file> together with ./ping64. The -k parameter is to
+indicate the DNSSEC keys file, both DNSKEY or DS record is ok. For
+example
+    dig aaaa DNSKEY nl > keys
+    ./ping64 -s -k keys -u nlnetlabs.nl www.helsinki.fi

@@ -1,0 +1,134 @@
+Tested on Ubuntu 10.04 with kernel version 3.0.0
+
+Bind 9.7.2
+Do not forget to turn on Bind to listen for IPv6 queries. This can be set 
+in the bind configuration file (default in /etc/named.conf). A example 
+option list in named.conf:
+options {
+	directory "/etc/named.d";
+	listen-on-v6 { any; };
+	dns64-prefix 64:ff9b::/96;
+};
+
+Bind 9.8 or newer version
+After Bind 9.8, the server can add more than one prefix. Each one prefix 
+uses its own parameters:
+options {
+	dns64 64:ff9b::/96 {
+		clients { any; }; // only works for the clients listed here
+		mapped 	{ !192.168.0.100; any; }; /* not add prefix for 
+                                            192.168.0.100 */	
+	}
+}
+
+
+ecdysis-nat64
+1) If you download the source file (ecdysis-nf-nat64-20101117.tar.gz) from 
+ecdysis.viagenie.ca, and your linux version is newer than 2.6.35, the make 
+operation may fail. This can be solved by install a patch to the source 
+files. The patch file has been downloaded as 
+ecdysis-nf-nat64-newer-version.patch. If you are using the latest version 
+(20140422), there should be no problem for all the kernel version under 
+3.13.10
+
+2) The IPv4 address used for the nat64-config.sh should be the address of 
+the interface whish is connected to Internet
+
+3) It maybe needs to restart your computer to make the nat64 working
+
+If installed successfully, you can see a new interface called nat64 (by 
+using ifconfig command) after running the nat64-config.sh
+
+Problem on Intel iwlagn driver
+When we were testing ecdysis, the Intel iwlagn driver (e.g. 5100 serial) 
+could not work with nat64. You may need to change another interface with 
+different driver in this case.
+
+Problem on ICMPv6 neighbor solicitation
+After installed Bind and ecdysis-nat64, you may face another problem: 
+your middlebox does not reply the ICMPv6 neighbor solicitation query 
+(This may happen for some old network interface driver). The client's 
+packets still can not be sent to middlebox. You can config your middlebox 
+to answer these queries by setting IPv6 neighbor proxy by perform:
+	sysctl -w net.ipv6.conf.all.proxy_ndp=1
+	ip -6 neigh add proxy <IPv6 address> dev <iface>
+However, this can only add one specific address each time. If you wish to 
+handle all the address, you can use npd6 (https://code.google.com/p/npd6/)
+
+
+npd6
+npd6 is a Linux daemon to provide a proxy service for IPv6 Neighbor 
+Solicitation to a configured address prefix. The installation and 
+configuration are simple and straight-forward.
+
+In the configuration, each prefix you wish to handle needs to have a 
+corresponsding interface. For example, if you want to handle 64:ff9b::/96 
+and 2001:da8::/96, you need to write two pairs of prefixes:
+	prefix=64:ff9b::/96
+	interface=eth0
+	prefix=2001:da8::/96
+	interface=eth0
+
+
+TAYGA
+Users need to set more parameters manually before using TAYGA. Some 
+madantory parameters can be set like this in /usr/local/etc/tayga.conf:
+	tun-device nat64
+	ipv4-addr 172.0.0.1     # IP address of tayga, different from the one 
+                            # used in ecdysis
+	prefix 64:ff9b::/96		# dns64 prefix, TAYGA use this to convert the 
+                            # dest address
+	dynamic-pool 172.0.0.0/24	# pool for mapping IPv6 addresses, TAYGA 
+                                # use this to convert the src address
+
+Then you need to add the nat64 interface, set the routing parameters for 
+it, and enable the packet forwarding.
+	tayga --mktun
+	ip link set nat64 up
+	ip addr add 172.0.0.1 dev nat64
+	# ip addr add (your_tayga_ipv6_addr) dev nat64 
+    // this is optional, if you set an IPv6 addr for TAYGA in last step
+	ip route add 172.0.0.0/24 dev nat64
+    // this should be the routing entry for the prefix
+	ip route add 64:ff9b::/96 dev nat64
+	sysctl -w net.ipv4.conf.all.forwarding=1
+	sysctl -w net.ipv6.conf.all.forwarding=1
+
+Depending on your network configuration, you may need another nat 
+(ipv4-ipv4) box between your nat64 and the external interface connecting 
+to the Internet. 
+	iptables -t nat -A POSTROUTING -o eht1(ipv4 external iface) -j MASQUERADE
+this command will change the ipv4 src address of packet generated from
+TAYGA-NAT64 to the ipv4 address of eth1. Then you can run "tayga" to
+start the service, or run "tayga -d" in the foreground 
+ 
+Problem: iptables command does not work if using shell script or running 
+TAYGA in a different shell (???)
+
+*** It seems that Tayga can not translate the packet whose destination
+address is among the famous private ipv4 address:
+    10.0.0.0
+    172.16.0.0
+    192.168.0.0
+The nat64 interface will send you icmpv6 no route packet back directly.
+
+WrapSix
+1) There is no seperated configuration file for WrapSix. You should set 
+the parameters in src/wrapper.c and src/wrapper.h before compiling them. 
+For the IPV4_ADDR, I use the external ipv4 address assigned to eth1, which 
+is different from the instruction.
+
+INTERFACE should be the IPv6 iface on your middle box
+
+2) add an IPv6 route entry and close IPv6 forwarding to avoid the ICMPv6 
+unreachable error:
+	sysctl -w net.ipv6.conf.all.forwarding=0 
+	ip -6 route add 64:ff9b::/96(Your Prefix) dev eth0(the IPv6 iface which receives the packet)
+
+3) to enable TCP connection with WrapSix, you need to disable the
+kernel sending RST packet when the interface receive TCP packets to the
+port which is not open. One temporary solution is to drop the RST pkt
+(not a good mothed >_<):
+    iptables -A OUTPUT -p tcp --tcp-flags RST RST -j DROP
+When you stop the WrapSix, use iptables --flush to clear the rule.
+

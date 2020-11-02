@@ -1,0 +1,9 @@
+1. To compile the code successfully, you need to have the libunbound
+library first. Normally the library is installed together with unbound.
+Please make sure the libunbound is installed in the path which gcc will
+search automaticaly by default.
+
+Or you could include your libunbound path in the Makefile. For example, 
+you could append "-Wl,-rpath=/your/path" to the original CFLAGS. After
+compiling, you could check the link path by using "ldd ping64".
+
